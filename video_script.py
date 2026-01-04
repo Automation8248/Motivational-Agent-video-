@@ -98,7 +98,7 @@ def create_video(quote):
     txt = (
         TextClip(
             text,
-            fontsize=65,
+            fontsize=85,
             color="white",
             font="Arial-Bold",
             method="caption",
