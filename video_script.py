@@ -10,7 +10,7 @@ from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoCli
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
-STRAICO_API_KEY = os.getenv('STRAICO_API_KEY')
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')  # Replacing Straico
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
@@ -18,28 +18,35 @@ WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 AUTHOR = "Lucas Hart"
 DURATION = 5
 
-# ================== AI DATA ==================
+# ================== AI DATA (Gemini) ==================
 def get_ai_data():
-    url = "https://api.straico.com/v1/prompt/completion"
     prompt = (
         f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
         f"and a catchy title (max 40 chars). "
         f"Return ONLY JSON: {{\"title\":\"...\",\"quote\":\"...\"}}"
     )
 
-    headers = {"Authorization": f"Bearer {STRAICO_API_KEY}"}
-    payload = {"models": ["google/gemini-2.0-flash-exp"], "message": prompt}
-
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=25)
-        raw = res.json()['data']['completions']['google/gemini-2.0-flash-exp']['completion'].strip()
+        res = requests.post(
+            "https://openrouter.ai/api/v1/chat/completions",
+            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}"},
+            json={
+                "model": "google/gemini-2.0-flash-exp:free",
+                "messages": [{"role": "user", "content": prompt}]
+            },
+            timeout=25
+        )
 
+        raw = res.json()["choices"][0]["message"]["content"].strip()
+
+        # Remove code fences if any
         if "```" in raw:
             raw = raw.split("```")[1]
 
         data = json.loads(raw)
-        return data['title'], data['quote']
-    except:
+        return data.get('title', 'Daily Inspiration'), data.get('quote', 'Success starts with self-discipline.')
+    except Exception as e:
+        print("AI Error:", e)
         return "Daily Inspiration", "Success starts with self-discipline."
 
 # ================== PIXABAY IMAGE ==================
