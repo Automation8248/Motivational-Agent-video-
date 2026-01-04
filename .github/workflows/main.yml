@@ -2,10 +2,11 @@ name: Daily Motivation Video
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 9 AM EST
-    - cron: '0 23 * * *'  # 6 PM EST
-  workflow_dispatch:
+    - cron: '0 14 * * *'  # 9 AM EST (Morning USA)
+    - cron: '0 23 * * *'  # 6 PM EST (Evening USA)
+  workflow_dispatch:      # Manual testing ke liye button
 
+# Permission fix: Isse workflow ko files (history) push karne ki power milti hai
 permissions:
   contents: write
 
@@ -16,17 +17,24 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Install Tools
+      - name: Install System Tools
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
-          # ImageMagick security policy fix
+          # ImageMagick policy fix taaki text render ho sake
           sudo sed -i 's/domain="path" rights="none" pattern="@\*"/domain="path" rights="read|write" pattern="@\*"/g' /etc/ImageMagick-6/policy.xml
 
-      - name: Install Python Deps
-        run: pip install requests moviepy
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.10'
 
-      - name: Run Automation
+      - name: Install Python Deps
+        run: |
+          pip install requests 
+          pip install moviepy==1.0.3  # Specific version for better stability
+
+      - name: Run Automation Script
         env:
           PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
           FREESOUND_API_KEY: ${{ secrets.FREESOUND_API_KEY }}
@@ -36,10 +44,12 @@ jobs:
           WEBHOOK_URL: ${{ secrets.WEBHOOK_URL }}
         run: python video_script.py
 
-      - name: Save History
+      - name: Save Video History
         run: |
-          git config --local user.email "action@github.com"
-          git config --local user.name "GitHub Action"
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          # Agar file exist nahi karti toh error na aaye isliye touch use kiya hai
+          touch video_history.txt
           git add video_history.txt
-          git commit -m "Update history" || echo "No changes"
+          git commit -m "Update video history log" || echo "No changes to commit"
           git push
