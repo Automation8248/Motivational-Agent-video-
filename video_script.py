@@ -1,28 +1,28 @@
 import requests, os, random, json, time
-
-# PIL Fix for moviepy compatibility
+from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
 import PIL.Image
+
+# ---------- PIL Fix ----------
 if not hasattr(PIL.Image, 'ANTIALIAS'):
     PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
-
-from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
 
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
-GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Use Gemini key here
+GEMINI_API_KEY = os.getenv('GEMINI_API_KEY')  # Add your Gemini API key
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 AUTHOR = "Lucas Hart"
-DURATION = 5
+DURATION = 5  # Video duration in seconds
+HISTORY_FILE = "quotes_history.txt"
 
 # ================== AI DATA (Gemini) ==================
-def get_ai_data():
+def get_ai_data(max_retries=5):
     """
     Fetches a fresh motivational quote and title from Gemini Generative Language API.
-    Returns (title, quote)
+    Ensures the quote is unique (not used before).
     """
     prompt = (
         f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
@@ -30,39 +30,49 @@ def get_ai_data():
         f"Return ONLY JSON: {{\"title\":\"...\",\"quote\":\"...\"}}"
     )
 
-    try:
-        res = requests.post(
-            "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateMessage",
-            headers={
-                "Authorization": f"Bearer {GEMINI_API_KEY}",
-                "Content-Type": "application/json"
-            },
-            json={
-                "prompt": {"text": prompt},
-                "temperature": 0.7,
-                "maxOutputTokens": 256
-            },
-            timeout=25
-        )
+    history = set(open(HISTORY_FILE).read().splitlines() if os.path.exists(HISTORY_FILE) else [])
 
-        raw = res.json()["candidates"][0]["content"].strip()
+    for attempt in range(max_retries):
+        try:
+            res = requests.post(
+                "https://generativelanguage.googleapis.com/v1beta2/models/text-bison-001:generateMessage",
+                headers={
+                    "Authorization": f"Bearer {GEMINI_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "prompt": {"text": prompt},
+                    "temperature": 0.7,
+                    "maxOutputTokens": 256
+                },
+                timeout=25
+            )
 
-        # Remove code fences if present
-        if "```" in raw:
-            raw = raw.split("```")[1]
+            raw = res.json()["candidates"][0]["content"].strip()
+            if "```" in raw:
+                raw = raw.split("```")[1]
 
-        data = json.loads(raw)
-        return data.get('title', 'Daily Inspiration'), data.get('quote', 'Success starts with self-discipline.')
+            data = json.loads(raw)
+            quote = data.get("quote", "").strip()
+            title = data.get("title", "Daily Inspiration").strip()
 
-    except Exception as e:
-        print("AI Error:", e)
-        return "Daily Inspiration", "Success starts with self-discipline."
+            if quote and quote not in history:
+                with open(HISTORY_FILE, "a") as f:
+                    f.write(quote + "\n")
+                return title, quote
+
+        except Exception as e:
+            print(f"Attempt {attempt+1} AI Error:", e)
+            time.sleep(1)
+
+    # Fallback if no unique quote
+    fallback_quote = "Discipline today leads to success tomorrow."
+    fallback_title = "Daily Inspiration"
+    print("Using fallback quote.")
+    return fallback_title, fallback_quote
 
 # ================== PIXABAY IMAGE ==================
 def get_real_nature_img():
-    """
-    Fetches a nature photo from Pixabay that is real (no illustrations, no vector graphics)
-    """
     url = "https://pixabay.com/api/"
     params = {
         "key": PIXABAY_KEY,
@@ -127,7 +137,6 @@ def create_video(quote):
         .set_duration(DURATION)
     )
 
-    # ---------- AUDIO ----------
     audio = None
     try:
         search = requests.get(
@@ -137,7 +146,6 @@ def create_video(quote):
         ).json()
 
         s_id = search["results"][0]["id"]
-
         info = requests.get(
             f"https://freesound.org/apiv2/sounds/{s_id}/",
             params={"token": FREESOUND_KEY},
@@ -167,16 +175,13 @@ def create_video(quote):
 # ================== MAIN ==================
 if __name__ == "__main__":
     try:
-        # ---------- STEP 1: Get new motivational quote ----------
         print("Step 1: Fetch AI motivational quote")
         title, quote = get_ai_data()
         print(f"Quote: {quote}")
 
-        # ---------- STEP 2: Create video ----------
         print("Step 2: Generate video")
         video_file = create_video(quote)
 
-        # ---------- STEP 3: Upload to Catbox ----------
         print("Step 3: Upload to Catbox")
         with open(video_file, "rb") as f:
             catbox_url = requests.post(
