@@ -1,7 +1,7 @@
 import requests, os, random, json
-from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
+from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip, ColorClip
 
-# API Keys from GitHub Secrets
+# API Keys
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
 OPENROUTER_KEY = os.getenv('OPENROUTER_API_KEY')
@@ -10,11 +10,11 @@ TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
 
 AUTHOR = "Lucas Hart"
-DURATION = 5  # Duration set to 5 seconds
+DURATION = 5 
 
 def get_ai_data():
-    """Sirf quote aur title lena (Strict 50 char limit)"""
-    prompt = f"Provide a unique motivational quote by {AUTHOR} (max 45 chars). No stars, no labels. Just the sentence."
+    """AI se quote aur short title/caption mangwana"""
+    prompt = f"Write 1 unique short motivational quote by {AUTHOR}. Max 45 characters. Also give a 5-word title and 8 hashtags. No stars, no labels."
     res = requests.post(
         "https://openrouter.ai/api/v1/chat/completions",
         headers={"Authorization": f"Bearer {OPENROUTER_KEY}"},
@@ -23,18 +23,17 @@ def get_ai_data():
             "messages": [{"role": "user", "content": prompt}]
         }
     )
-    # Cleaning AI response
-    raw_quote = res.json()['choices'][0]['message']['content'].strip()
-    clean_quote = raw_quote.replace("*", "").replace('"', "").replace("Quote:", "").strip()
-    return clean_quote[:50] # Hard limit 50 chars
+    raw_text = res.json()['choices'][0]['message']['content'].strip()
+    # Cleaning
+    clean_text = raw_text.replace("*", "").replace('"', "").replace("Quote:", "").replace("Title:", "").strip()
+    return clean_text
 
-def get_unique_img():
-    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q=nature+forest+landscape&orientation=vertical&per_page=100"
+def get_img():
+    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q=nature+forest+mountain&orientation=vertical&per_page=100"
     hits = requests.get(url).json()['hits']
     
     if os.path.exists("video_history.txt"):
-        with open("video_history.txt", "r") as f:
-            history = f.read().splitlines()
+        with open("video_history.txt", "r") as f: history = f.read().splitlines()
     else: history = []
 
     for hit in hits:
@@ -46,57 +45,47 @@ def get_unique_img():
 
 def create_video(quote):
     # Background Image
-    clip = ImageClip(get_unique_img()).set_duration(DURATION)
+    bg = ImageClip(get_img()).set_duration(DURATION).resize(height=1920) # Shorts Size
     
-    # HIGHLIGHT LOGIC: Quote ko highlight karne ke liye semi-transparent background
-    # Font size 75 for better visibility
-    txt_clip = TextClip(
-        f"{quote}\n\n- {AUTHOR}",
-        fontsize=75, 
-        color='white', 
-        font='Arial-Bold',
-        method='caption',
-        size=(900, None), # Width adjusted for highlight
-        bg_color='black', # Black background highlight
-        stroke_color='white',
-        stroke_width=1
-    ).set_duration(DURATION).set_opacity(0.85).set_position('center')
+    # Highlight Box (Text ke piche halka black parda taaki quote highlight ho)
+    shadow = ColorClip(size=(900, 450), color=(0,0,0)).set_opacity(0.4).set_duration(DURATION).set_position('center')
+
+    # Quote Text (Bada size aur Center)
+    txt = TextClip(f"{quote}\n\n- {AUTHOR}", fontsize=75, color='white', font='Arial-Bold',
+                   method='caption', size=(850, None), align='Center').set_duration(DURATION).set_position('center')
     
-    # Background Music
-    search = f"https://freesound.org/apiv2/search/text/?query=piano+ambient&token={FREESOUND_KEY}"
+    # Music
+    search = f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}"
     sound_id = requests.get(search).json()['results'][0]['id']
-    sound_info = requests.get(f"https://freesound.org/apiv2/sounds/{sound_id}/?token={FREESOUND_KEY}").json()
-    with open('music.mp3', 'wb') as f: f.write(requests.get(sound_info['previews']['preview-hq-mp3']).content)
+    info = requests.get(f"https://freesound.org/apiv2/sounds/{sound_id}/?token={FREESOUND_KEY}").json()
+    with open('music.mp3', 'wb') as f: f.write(requests.get(info['previews']['preview-hq-mp3']).content)
     
     audio = AudioFileClip('music.mp3').subclip(0, DURATION)
     
-    # Merge and Export
-    video = CompositeVideoClip([clip, txt_clip]).set_audio(audio)
-    video.write_videofile("final_video.mp4", fps=24, codec="libx264")
-    return "final_video.mp4"
+    # Final Merged Video
+    final = CompositeVideoClip([bg, shadow, txt]).set_audio(audio)
+    final.write_videofile("short.mp4", fps=24, codec="libx264")
+    return "short.mp4"
 
-def upload_to_catbox(file):
+def upload_catbox(file):
     with open(file, 'rb') as f:
-        res = requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': f})
-    return res.text.strip()
+        return requests.post("https://catbox.moe/user/api.php", data={'reqtype': 'fileupload'}, files={'fileToUpload': f}).text.strip()
 
-# Execution Sequence
+# Final Execution
 try:
-    final_quote = get_ai_data()
-    video_file = create_video(final_quote)
-    catbox_url = upload_to_catbox(video_file)
+    content = get_ai_data()
+    # Title/Caption control (Max 50 chars)
+    short_caption = content.split('\n')[0][:50] 
+    hashtags = "#motivation #shorts #lucashart #nature #quotes #success #inspiration #mindset"
 
-    # 8 Hashtags fix
-    hashtags = "#motivation #quotes #lucashart #nature #shorts #success #mindset #viral"
-    caption = f"{final_quote}\n\n{hashtags}"
+    video_file = create_video(content.split('\n')[0]) # Sirf Quote video par dikhega
+    catbox_url = upload_catbox(video_file)
 
-    # Send to Telegram
-    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
-                  data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption})
-    
-    # Send to Webhook
-    requests.post(WEBHOOK_URL, json={"url": catbox_url, "quote": final_quote, "hashtags": hashtags})
-    
-    print(f"Success! URL: {catbox_url}")
+    # Telegram & Webhook
+    final_msg = f"✨ {short_caption}\n\n{hashtags}"
+    requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": final_msg})
+    requests.post(WEBHOOK_URL, json={"video_url": catbox_url, "caption": final_msg})
+
+    print(f"Success: {catbox_url}")
 except Exception as e:
     print(f"Error: {e}")
