@@ -21,7 +21,7 @@ DURATION = 5
 def get_ai_quote():
     """OpenRouter Free version with Fallback for 429 errors"""
     url = "https://openrouter.ai/api/v1/chat/completions"
-    prompt = f"Write one unique short motivational sentence by {AUTHOR}. Max 45 characters. No titles, no labels, no stars. Just the text."
+    prompt = f"Write one unique short motivational sentence by {AUTHOR}. Max 90 characters. No titles, no labels, no stars. Just the text."
     
     try:
         res = requests.post(url, headers={"Authorization": f"Bearer {OPENROUTER_KEY}"}, 
