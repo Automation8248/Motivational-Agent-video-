@@ -46,12 +46,17 @@ def get_ai_data():
 def get_unique_nature_img():
     url = "https://pixabay.com/api/"
     params = {
-        "key": PIXABAY_KEY,
-        "q": "nature landscape mountain",
-        "orientation": "vertical",
-        "per_page": 100,
-        "safesearch": "true"
-    }
+    "key": PIXABAY_KEY,
+    "q": "nature mountain landscape photography",
+    "image_type": "photo",          # ❌ vector / illustration remove
+    "category": "nature",
+    "orientation": "vertical",
+    "editors_choice": "true",       # curated photos only
+    "order": "popular",
+    "per_page": 100,
+    "safesearch": "true"
+}
+
 
     try:
         res = requests.get(url, params=params, timeout=15)
