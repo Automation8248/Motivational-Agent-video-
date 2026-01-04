@@ -10,7 +10,7 @@ from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoCli
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
-OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')  # Replacing Straico
+OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')  # Gemini
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 WEBHOOK_URL = os.getenv('WEBHOOK_URL')
@@ -20,6 +20,10 @@ DURATION = 5
 
 # ================== AI DATA (Gemini) ==================
 def get_ai_data():
+    """
+    Fetches a fresh motivational quote and title from Gemini via OpenRouter.
+    Returns (title, quote)
+    """
     prompt = (
         f"Generate a unique motivational quote by {AUTHOR} (max 100 chars) "
         f"and a catchy title (max 40 chars). "
@@ -39,7 +43,7 @@ def get_ai_data():
 
         raw = res.json()["choices"][0]["message"]["content"].strip()
 
-        # Remove code fences if any
+        # Remove code fences if present
         if "```" in raw:
             raw = raw.split("```")[1]
 
@@ -50,20 +54,28 @@ def get_ai_data():
         return "Daily Inspiration", "Success starts with self-discipline."
 
 # ================== PIXABAY IMAGE ==================
-def get_unique_nature_img():
+def get_real_nature_img():
+    """
+    Fetches a nature photo from Pixabay that is real (no illustrations, no vector graphics)
+    """
     url = "https://pixabay.com/api/"
     params = {
         "key": PIXABAY_KEY,
-        "q": "nature landscape mountain",
+        "q": "nature landscape mountain forest river lake waterfall sunset",
         "orientation": "vertical",
         "per_page": 100,
-        "safesearch": "true"
+        "safesearch": "true",
+        "image_type": "photo"  # Ensures only real photos
     }
 
     try:
         res = requests.get(url, params=params, timeout=15)
         res.raise_for_status()
         hits = res.json().get("hits", [])
+
+        if not hits:
+            print("No real photos found.")
+            return None
 
         history_file = "video_history.txt"
         history = open(history_file).read().splitlines() if os.path.exists(history_file) else []
@@ -85,7 +97,7 @@ def get_unique_nature_img():
 
 # ================== VIDEO ==================
 def create_video(quote):
-    bg = get_unique_nature_img()
+    bg = get_real_nature_img()
     if not bg:
         raise Exception("Image download failed")
 
@@ -149,13 +161,13 @@ def create_video(quote):
 
 # ================== MAIN ==================
 try:
-    print("Step 1: AI Data")
+    print("Step 1: Fetch AI motivational quote")
     title, quote = get_ai_data()
 
-    print("Step 2: Video")
+    print("Step 2: Generate video")
     video_file = create_video(quote)
 
-    print("Step 3: Upload")
+    print("Step 3: Upload to Catbox")
     with open(video_file, "rb") as f:
         catbox_url = requests.post(
             "https://catbox.moe/user/api.php",
@@ -172,6 +184,7 @@ try:
         f"#motivation #nature #shorts #lucashart #success #mindset"
     )
 
+    # ---------- TELEGRAM ----------
     requests.post(
         f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
         data={
@@ -182,6 +195,7 @@ try:
         }
     )
 
+    # ---------- WEBHOOK ----------
     if WEBHOOK_URL:
         requests.post(
             WEBHOOK_URL,
@@ -193,4 +207,3 @@ try:
 
 except Exception as e:
     print("Fatal Error:", e)
-
