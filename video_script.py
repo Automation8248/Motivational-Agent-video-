@@ -1,5 +1,5 @@
 import requests, os, random, json, time
-from moviepy.editor import ImageClip, TextClip, CompositeVideoClip
+from moviepy.editor import ImageClip, TextClip, CompositeVideoClip, AudioFileClip
 import PIL.Image
 
 # ---------- PIL Fix ----------
@@ -9,28 +9,29 @@ if not hasattr(PIL.Image, 'ANTIALIAS'):
 # ================== ENV KEYS ==================
 PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
+FREESOUND_API_KEY = os.getenv('FREESOUND_API_KEY')
+
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Discord / custom webhook
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
 AUTHOR = "Lucas Hart"
 DURATION = 5
 HISTORY_FILE = "quotes_history.txt"
 
-# ================== AI DATA ==================
-def get_ai_content(max_retries=5):
+# ================== AI CONTENT ==================
+def get_ai_content():
     prompt = f"""
-Generate a UNIQUE motivational short-video content.
+Generate UNIQUE motivational content.
 
 Rules:
 - Quote max 100 characters
 - Title max 40 characters
-- Caption should be inspiring (1–2 lines)
-- Exactly 8 hashtags
-- Hashtags must be short & trending
+- Caption 1–2 inspiring lines
+- EXACTLY 8 motivational hashtags
 - Do NOT repeat previous quotes
 
-Return ONLY valid JSON in this format:
+Return ONLY JSON:
 {{
   "title": "",
   "quote": "",
@@ -38,91 +39,93 @@ Return ONLY valid JSON in this format:
   "hashtags": ["", "", "", "", "", "", "", ""]
 }}
 
-Author name to include: {AUTHOR}
+Author: {AUTHOR}
 """
 
-    history = set(open(HISTORY_FILE).read().splitlines() if os.path.exists(HISTORY_FILE) else [])
+    res = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers={
+            "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            "Content-Type": "application/json"
+        },
+        json={
+            "model": "meta-llama/llama-3-8b-instruct",
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.8,
+            "max_tokens": 300
+        }
+    )
 
-    for attempt in range(max_retries):
-        try:
-            res = requests.post(
-                "https://openrouter.ai/api/v1/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                    "Content-Type": "application/json",
-                    "HTTP-Referer": "https://example.com",
-                    "X-Title": "AI Motivation Shorts"
-                },
-                json={
-                    "model": "meta-llama/llama-3-8b-instruct",
-                    "messages": [{"role": "user", "content": prompt}],
-                    "temperature": 0.8,
-                    "max_tokens": 300
-                },
-                timeout=30
-            )
+    raw = res.json()["choices"][0]["message"]["content"]
+    if "```" in raw:
+        raw = raw.split("```")[1]
 
-            raw = res.json()["choices"][0]["message"]["content"].strip()
-            if "```" in raw:
-                raw = raw.split("```")[1]
-
-            data = json.loads(raw)
-            quote = data["quote"].strip()
-
-            if quote and quote not in history:
-                with open(HISTORY_FILE, "a") as f:
-                    f.write(quote + "\n")
-                return data
-
-        except Exception as e:
-            print(f"AI Attempt {attempt+1} Error:", e)
-            time.sleep(1)
-
-    return {
-        "title": "Daily Motivation",
-        "quote": "Discipline today builds unstoppable success tomorrow.",
-        "caption": "Stay focused. Stay consistent. Results will follow.",
-        "hashtags": ["#motivation", "#success", "#mindset", "#goals", "#discipline", "#focus", "#growth", "#shorts"]
-    }
+    return json.loads(raw)
 
 # ================== PIXABAY IMAGE ==================
-def get_real_nature_img():
-    url = "https://pixabay.com/api/"
-    params = {
-        "key": PIXABAY_KEY,
-        "q": "nature landscape mountain sunrise",
-        "orientation": "vertical",
-        "image_type": "photo",
-        "per_page": 100,
-        "safesearch": "true"
-    }
+def get_bg_image():
+    r = requests.get(
+        "https://pixabay.com/api/",
+        params={
+            "key": PIXABAY_KEY,
+            "q": "nature sunrise mountain",
+            "orientation": "vertical",
+            "image_type": "photo",
+            "per_page": 50,
+            "safesearch": "true"
+        }
+    )
+    img_url = random.choice(r.json()["hits"])["largeImageURL"]
+    img = requests.get(img_url).content
 
-    res = requests.get(url, params=params, timeout=15)
-    hits = res.json().get("hits", [])
-    random.shuffle(hits)
-
-    img = requests.get(hits[0]["largeImageURL"]).content
     with open("bg.jpg", "wb") as f:
         f.write(img)
 
     return "bg.jpg"
 
+# ================== FREESOUND MUSIC ==================
+def get_music():
+    headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
+    r = requests.get(
+        "https://freesound.org/apiv2/search/text/",
+        headers=headers,
+        params={
+            "query": "motivational cinematic",
+            "filter": "duration:[10 TO 60]",
+            "page_size": 10
+        }
+    )
+
+    sound_id = random.choice(r.json()["results"])["id"]
+    data = requests.get(
+        f"https://freesound.org/apiv2/sounds/{sound_id}/",
+        headers=headers
+    ).json()
+
+    audio = requests.get(data["previews"]["preview-hq-mp3"]).content
+    with open("music.mp3", "wb") as f:
+        f.write(audio)
+
+    return "music.mp3"
+
 # ================== VIDEO ==================
 def create_video(quote):
-    bg = get_real_nature_img()
+    bg = get_bg_image()
+    music = get_music()
 
     clip = (
         ImageClip(bg)
         .set_duration(DURATION)
         .resize(height=1920)
-        .fl_image(lambda img: (img * 0.7).astype("uint8"))
+        .fl_image(lambda i: (i * 0.7).astype("uint8"))
     )
 
     txt = (
         TextClip(
             f"{quote}\n\n- {AUTHOR}",
-            fontsize=65,
+            fontsize=80,
             color="white",
+            font="Arial",
             method="caption",
             size=(850, None)
         )
@@ -130,67 +133,53 @@ def create_video(quote):
         .set_duration(DURATION)
     )
 
-    video = CompositeVideoClip([clip, txt])
+    audio = AudioFileClip(music).volumex(0.4).subclip(0, DURATION)
+
+    video = CompositeVideoClip([clip, txt]).set_audio(audio)
     video.write_videofile("final_short.mp4", fps=24, codec="libx264")
 
     return "final_short.mp4"
 
-# ================== CATBOX UPLOAD ==================
-def upload_to_catbox(file_path):
-    with open(file_path, "rb") as f:
-        res = requests.post(
+# ================== CATBOX ==================
+def upload_to_catbox(path):
+    with open(path, "rb") as f:
+        r = requests.post(
             "https://catbox.moe/user/api.php",
             data={"reqtype": "fileupload"},
-            files={"fileToUpload": f},
-            timeout=60
+            files={"fileToUpload": f}
         )
-    if res.status_code == 200:
-        return res.text.strip()
-    raise Exception("Catbox upload failed")
+    return r.text.strip()
 
 # ================== WEBHOOK ==================
-def send_to_webhook(webhook_url, title, video_url):
-    payload = {
-        "content": f"🎬 **{title}**\n\n🔗 {video_url}"
-    }
-    requests.post(webhook_url, json=payload, timeout=10)
+def send_webhook(url):
+    requests.post(url, json={"content": url})
 
 # ================== MAIN ==================
 if __name__ == "__main__":
-    print("Generating AI content...")
     data = get_ai_content()
 
-    title = data["title"]
-    quote = data["quote"]
-    caption_text = data["caption"]
-    hashtags = " ".join(data["hashtags"])
+    video = create_video(data["quote"])
+    catbox_link = upload_to_catbox(video)
 
-    print("Creating video...")
-    video_file = create_video(quote)
-
-    print("Uploading to Catbox...")
-    catbox_url = upload_to_catbox(video_file)
-
-    caption = (
-        f"🎬 *{title}*\n\n"
-        f"✨ {caption_text}\n\n"
-        f"🔗 {catbox_url}\n\n"
-        f"{hashtags}"
-    )
-
+    # 🔗 Webhook → only link
     if WEBHOOK_URL:
-        print("Sending to Webhook...")
-        send_to_webhook(WEBHOOK_URL, title, catbox_url)
+        send_webhook(catbox_link)
 
-    print("Sending to Telegram...")
-    requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
-        json={
-            "chat_id": TG_CHAT_ID,
-            "text": caption,
-            "parse_mode": "Markdown"
-        }
+    # 📹 Telegram → video + title + caption + hashtags
+    telegram_caption = (
+        f"🎬 *{data['title']}*\n\n"
+        f"{data['caption']}\n\n"
+        f"{' '.join(data['hashtags'])}"
     )
 
-    print("✅ DONE")
+    requests.post(
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
+        data={
+            "chat_id": TG_CHAT_ID,
+            "caption": telegram_caption,
+            "parse_mode": "Markdown"
+        },
+        files={"video": open(video, "rb")}
+    )
 
+    print("✅ ALL DONE")
