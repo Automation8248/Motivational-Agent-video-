@@ -61,7 +61,7 @@ def create_video(quote_text):
     # 2. Text (Pure White, No Stroke, Fixed Author Lucas Hart)
     full_display_text = f"\"{quote_text}\"\n\n- {FIXED_AUTHOR}"
     
-    txt = TextClip(full_display_text, fontsize=65, color='white', font='Arial-Bold', 
+    txt = TextClip(full_display_text, fontsize=80, color='white', font='Arial-Bold', 
                    method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
     
     # 3. Audio (Piano Music)
