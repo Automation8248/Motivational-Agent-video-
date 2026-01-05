@@ -11,14 +11,14 @@ PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
 OPENROUTER_API_KEY = os.getenv('OPENROUTER_API_KEY')
 TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
 TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+WEBHOOK_URL = os.getenv("WEBHOOK_URL")  # Discord / custom webhook
 
 AUTHOR = "Lucas Hart"
 DURATION = 5
 HISTORY_FILE = "quotes_history.txt"
 
-# ================== AI DATA (OpenRouter FREE) ==================
+# ================== AI DATA ==================
 def get_ai_content(max_retries=5):
-
     prompt = f"""
 Generate a UNIQUE motivational short-video content.
 
@@ -54,7 +54,7 @@ Author name to include: {AUTHOR}
                     "X-Title": "AI Motivation Shorts"
                 },
                 json={
-                    "model": "meta-llama/llama-3-8b-instruct",  # FREE
+                    "model": "meta-llama/llama-3-8b-instruct",
                     "messages": [{"role": "user", "content": prompt}],
                     "temperature": 0.8,
                     "max_tokens": 300
@@ -63,7 +63,6 @@ Author name to include: {AUTHOR}
             )
 
             raw = res.json()["choices"][0]["message"]["content"].strip()
-
             if "```" in raw:
                 raw = raw.split("```")[1]
 
@@ -79,7 +78,6 @@ Author name to include: {AUTHOR}
             print(f"AI Attempt {attempt+1} Error:", e)
             time.sleep(1)
 
-    # Fallback
     return {
         "title": "Daily Motivation",
         "quote": "Discipline today builds unstoppable success tomorrow.",
@@ -137,6 +135,26 @@ def create_video(quote):
 
     return "final_short.mp4"
 
+# ================== CATBOX UPLOAD ==================
+def upload_to_catbox(file_path):
+    with open(file_path, "rb") as f:
+        res = requests.post(
+            "https://catbox.moe/user/api.php",
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": f},
+            timeout=60
+        )
+    if res.status_code == 200:
+        return res.text.strip()
+    raise Exception("Catbox upload failed")
+
+# ================== WEBHOOK ==================
+def send_to_webhook(webhook_url, title, video_url):
+    payload = {
+        "content": f"🎬 **{title}**\n\n🔗 {video_url}"
+    }
+    requests.post(webhook_url, json=payload, timeout=10)
+
 # ================== MAIN ==================
 if __name__ == "__main__":
     print("Generating AI content...")
@@ -150,15 +168,26 @@ if __name__ == "__main__":
     print("Creating video...")
     video_file = create_video(quote)
 
-    caption = f"🎬 *{title}*\n\n✨ {caption_text}\n\n{hashtags}"
+    print("Uploading to Catbox...")
+    catbox_url = upload_to_catbox(video_file)
 
-    print("Uploading to Telegram...")
+    caption = (
+        f"🎬 *{title}*\n\n"
+        f"✨ {caption_text}\n\n"
+        f"🔗 {catbox_url}\n\n"
+        f"{hashtags}"
+    )
+
+    if WEBHOOK_URL:
+        print("Sending to Webhook...")
+        send_to_webhook(WEBHOOK_URL, title, catbox_url)
+
+    print("Sending to Telegram...")
     requests.post(
-        f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo",
-        data={
+        f"https://api.telegram.org/bot{TG_TOKEN}/sendMessage",
+        json={
             "chat_id": TG_CHAT_ID,
-            "video": open(video_file, "rb"),
-            "caption": caption,
+            "text": caption,
             "parse_mode": "Markdown"
         }
     )
