@@ -1,134 +1,116 @@
-import requests, random
-from moviepy.editor import *
-from PIL import Image
-from telegram import Bot
+import requests, os, random, json, time
 
-# ================= CONFIG =================
-PIXABAY_API_KEY = "YOUR_PIXABAY_API_KEY"
-FREESOUND_API_KEY = "YOUR_FREESOUND_API_KEY"
-TELEGRAM_BOT_TOKEN = "YOUR_TELEGRAM_BOT_TOKEN"
-CHAT_ID = "YOUR_CHAT_ID"
-WEBHOOK_URL = "YOUR_WEBHOOK_URL"
+# PIL Fix for moviepy compatibility
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.LANCZOS
 
-AUTHOR = "Lucas Hart"
+from moviepy.editor import ImageClip, TextClip, AudioFileClip, CompositeVideoClip
+
+# Config & Keys
+PIXABAY_KEY = os.getenv('PIXABAY_API_KEY')
+FREESOUND_KEY = os.getenv('FREESOUND_API_KEY')
+TG_TOKEN = os.getenv('TELEGRAM_BOT_TOKEN')
+TG_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+WEBHOOK_URL = os.getenv('WEBHOOK_URL')
+
 DURATION = 5
 
-# ================= ENGLISH POST TEXT =================
-TITLES = [
-    "Daily Motivation",
-    "One Thought Can Change Everything",
-    "Start Your Day With Purpose",
-    "Pause And Reflect"
-]
+def get_free_quote():
+    """ZenQuotes API se free motivational quotes pick karega"""
+    try:
+        # Free API - No Key Required
+        res = requests.get("https://zenquotes.io/api/random", timeout=15)
+        data = res.json()[0]
+        quote = data['q']
+        author = data['a']
+        return quote, author
+    except Exception as e:
+        print(f"Quote Fetch Error: {e}")
+        return "Your only limit is your mind.", "Anonymous"
 
-CAPTIONS = [
-    "Let this message guide your mindset today.",
-    "Consistency creates success. Keep moving forward.",
-    "A small thought today can create a big change tomorrow.",
-    "Stay focused. Stay disciplined. Stay unstoppable."
-]
+def get_real_nature_img():
+    """Pixabay se clean nature photo pick karega (No CGI/Animation)"""
+    query = "nature+landscape+forest+mountain+-cgi+-animation+-vector"
+    url = f"https://pixabay.com/api/?key={PIXABAY_KEY}&q={query}&image_type=photo&orientation=vertical&per_page=50"
+    
+    try:
+        response = requests.get(url, timeout=15).json()
+        hits = response.get('hits', [])
+        
+        # Repetition rokne ke liye history check
+        history_file = "video_history.txt"
+        history = open(history_file, "r").read().splitlines() if os.path.exists(history_file) else []
+        
+        random.shuffle(hits)
+        for hit in hits:
+            if str(hit['id']) not in history:
+                img_data = requests.get(hit['largeImageURL'], timeout=15).content
+                if img_data:
+                    with open('bg.jpg', 'wb') as f: f.write(img_data)
+                    with open(history_file, "a") as f: f.write(str(hit['id']) + "\n")
+                    return 'bg.jpg'
+    except: return None
 
-HASHTAGS = [
-    "#motivation",
-    "#dailyquotes",
-    "#mindset",
-    "#success",
-    "#inspiration",
-    "#selfgrowth",
-    "#positivevibes",
-    "#dailymotivation"
-]
+def create_video(quote, author):
+    """Video banayega: Pure White Text + Dark Nature Background"""
+    bg_path = get_real_nature_img()
+    if not bg_path: raise Exception("Image download fail ho gayi.")
 
-# ================= QUOTE FETCH (FREE WEBSITE) =================
-def get_quote():
-    r = requests.get("https://zenquotes.io/api/random", timeout=10).json()
-    quote = r[0]["q"]
-    if len(quote) < 50:
-        return get_quote()
-    return f"{quote}\n\n— {AUTHOR}"
+    # 1. Background (Darkened for white text visibility)
+    bg = ImageClip(bg_path).set_duration(DURATION).resize(height=1920).fl_image(lambda image: (image * 0.6).astype('uint8'))
+    
+    # 2. Text (Pure White, No Stroke)
+    full_text = f"\"{quote}\"\n\n- {author}"
+    txt = TextClip(full_text, fontsize=65, color='white', font='Arial-Bold', 
+                   method='caption', size=(850, None), stroke_width=0).set_duration(DURATION).set_position('center')
+    
+    # 3. Audio (Piano Music)
+    try:
+        search = f"https://freesound.org/apiv2/search/text/?query=piano+soft&token={FREESOUND_KEY}"
+        s_id = requests.get(search, timeout=10).json()['results'][0]['id']
+        info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}", timeout=10).json()
+        audio_url = info['previews']['preview-hq-mp3']
+        with open('music.mp3', 'wb') as f: f.write(requests.get(audio_url).content)
+        audio = AudioFileClip('music.mp3').subclip(0, DURATION)
+    except: audio = None
+    
+    final = CompositeVideoClip([bg, txt])
+    if audio: final = final.set_audio(audio)
+    
+    final.write_videofile("final_short.mp4", fps=24, codec="libx264", audio_codec="aac")
+    return "final_short.mp4"
 
-# ================= PIXABAY IMAGE =================
-def fetch_image():
-    url = f"https://pixabay.com/api/?key={PIXABAY_API_KEY}&q=nature&orientation=vertical&per_page=50"
-    data = requests.get(url).json()
-    img = random.choice(data["hits"])
-    open("bg.jpg", "wb").write(requests.get(img["largeImageURL"]).content)
+# --- Main Flow ---
+try:
+    print("Step 1: Fetching Free Quote...")
+    quote_text, author_name = get_free_quote()
+    
+    print("Step 2: Creating Video...")
+    video_file = create_video(quote_text, author_name)
+    
+    print("Step 3: Uploading to Catbox...")
+    with open(video_file, 'rb') as f:
+        catbox_url = requests.post("https://catbox.moe/user/api.php", 
+                                    data={'reqtype': 'fileupload'}, files={'fileToUpload': f}).text.strip()
+    
+    if "http" in catbox_url:
+        # Title and Caption for Social Media
+        title = f"Daily Inspiration: {author_name}"
+        caption = f"🎬 **{title}**\n\n✨ {quote_text}\n\n#motivation #nature #quotes #shorts #success #mindset"
+        
+        print("Step 4: Sending to Telegram & Webhook...")
+        # Telegram Post
+        requests.post(f"https://api.telegram.org/bot{TG_TOKEN}/sendVideo", 
+                      data={"chat_id": TG_CHAT_ID, "video": catbox_url, "caption": caption, "parse_mode": "Markdown"})
+        
+        # Webhook for Make.com (URL Mapping Fixed)
+        if WEBHOOK_URL:
+            requests.post(WEBHOOK_URL, json={"url": catbox_url, "title": title, "caption": caption}, timeout=10)
+        
+        print(f"Workflow Complete! Link: {catbox_url}")
+    else:
+        print("Catbox Upload Failed.")
 
-# ================= FREESOUND MUSIC =================
-def fetch_music():
-    headers = {"Authorization": f"Token {FREESOUND_API_KEY}"}
-    params = {
-        "query": "soft piano",
-        "filter": "duration:[5 TO 15]",
-        "fields": "previews"
-    }
-    r = requests.get(
-        "https://freesound.org/apiv2/search/text/",
-        headers=headers,
-        params=params
-    ).json()
-    music_url = random.choice(r["results"])["previews"]["preview-hq-mp3"]
-    open("music.mp3", "wb").write(requests.get(music_url).content)
-
-# ================= VIDEO CREATE =================
-def create_video(text):
-    Image.open("bg.jpg").resize((1080,1920)).save("bg_r.jpg")
-    bg = ImageClip("bg_r.jpg").set_duration(DURATION)
-
-    txt = TextClip(
-        text,
-        fontsize=60,
-        color="white",
-        method="caption",
-        size=(900,None),
-        align="center"
-    ).set_position("center").set_duration(DURATION).fadein(0.5)
-
-    audio = AudioFileClip("music.mp3").subclip(0,DURATION).volumex(0.4)
-    video = CompositeVideoClip([bg, txt]).set_audio(audio)
-    video.write_videofile("final.mp4", fps=30)
-
-# ================= CATBOX UPLOAD =================
-def upload_catbox():
-    r = requests.post(
-        "https://catbox.moe/user/api.php",
-        data={"reqtype":"fileupload"},
-        files={"fileToUpload":open("final.mp4","rb")}
-    )
-    return r.text.strip()
-
-# ================= TELEGRAM =================
-def send_telegram(url):
-    bot = Bot(token=TELEGRAM_BOT_TOKEN)
-    msg = (
-        f"{random.choice(TITLES)}\n\n"
-        f"{random.choice(CAPTIONS)}\n\n"
-        f"{url}\n\n"
-        f"{' '.join(HASHTAGS)}"
-    )
-    bot.send_message(chat_id=CHAT_ID, text=msg)
-
-# ================= WEBHOOK =================
-def send_webhook(url):
-    payload = {
-        "title": random.choice(TITLES),
-        "caption": random.choice(CAPTIONS),
-        "video": url,
-        "hashtags": HASHTAGS,
-        "language": "en"
-    }
-    requests.post(WEBHOOK_URL, json=payload)
-
-# ================= MAIN =================
-def main():
-    quote = get_quote()
-    fetch_image()
-    fetch_music()
-    create_video(quote)
-    url = upload_catbox()
-    send_telegram(url)
-    send_webhook(url)
-
-if __name__ == "__main__":
-    main()
-
+except Exception as e:
+    print(f"Fatal Error: {e}")
