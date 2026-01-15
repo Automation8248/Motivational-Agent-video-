@@ -2,7 +2,6 @@ name: Daily Motivation Video
 
 on:
   schedule:
-    - cron: '0 14 * * *'  # 9 AM EST (Morning USA)
     - cron: '0 23 * * *'  # 6 PM EST (Evening USA)
   workflow_dispatch:      # Manual testing ke liye button
 
