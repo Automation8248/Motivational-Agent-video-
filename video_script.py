@@ -70,7 +70,7 @@ def create_video(quote_text):
         s_id = requests.get(search, timeout=10).json()['results'][0]['id']
         info = requests.get(f"https://freesound.org/apiv2/sounds/{s_id}/?token={FREESOUND_KEY}", timeout=10).json()
         with open('music.mp3', 'wb') as f: f.write(requests.get(info['previews']['preview-hq-mp3']).content)
-        audio = AudioFileClip('music.mp3').subclip(0, DURATION).volumex(2.5)
+        audio = AudioFileClip('music.mp3').subclip(0, DURATION)
     except: audio = None
     
     final = CompositeVideoClip([bg, txt])
